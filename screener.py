@@ -23,7 +23,7 @@ from typing import Optional
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-BYBIT = "https://api.bybit.com"
+BINANCE_DATA = "https://data-api.binance.vision"  # öffentlicher Binance-Spiegel, kein Geo-Block
 
 # ── Parameter (hier justieren) ────────────────────────────
 MIN_DAYS_ABOVE_EMA = 5
@@ -61,38 +61,31 @@ class ScreenResult:
 # Bybit Daten
 # ─────────────────────────────────────────────
 
-def get_all_linear_symbols() -> list:
+EXCLUDE_SUFFIX = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+EXCLUDE_BASES = {"USDC", "FDUSD", "TUSD", "DAI", "EUR", "GBP", "BUSD", "USDP", "AEUR", "XUSD"}
+
+def get_all_usdt_symbols() -> list:
+    r = requests.get(f"{BINANCE_DATA}/api/v3/exchangeInfo", timeout=30)
+    r.raise_for_status()
     symbols = []
-    cursor = ""
-    while True:
-        params = {"category": "linear", "limit": 1000}
-        if cursor:
-            params["cursor"] = cursor
-        r = requests.get(f"{BYBIT}/v5/market/instruments-info", params=params, timeout=20)
-        r.raise_for_status()
-        result = r.json()["result"]
-        for s in result["list"]:
-            if (s["quoteCoin"] == "USDT" and s["status"] == "Trading"
-                    and s["contractType"] == "LinearPerpetual"):
-                symbols.append(s["symbol"])
-        cursor = result.get("nextPageCursor", "")
-        if not cursor:
-            break
+    for s in r.json()["symbols"]:
+        if (s["quoteAsset"] == "USDT" and s["status"] == "TRADING"
+                and not s["symbol"].endswith(EXCLUDE_SUFFIX)
+                and s["baseAsset"] not in EXCLUDE_BASES):
+            symbols.append(s["symbol"])
     return symbols
 
 
 def get_daily_candles(symbol: str, limit: int = 400) -> Optional[list]:
     try:
-        r = requests.get(f"{BYBIT}/v5/market/kline",
-                         params={"category": "linear", "symbol": symbol,
-                                 "interval": "D", "limit": limit},
+        r = requests.get(f"{BINANCE_DATA}/api/v3/klines",
+                         params={"symbol": symbol, "interval": "1d", "limit": limit},
                          timeout=20)
         r.raise_for_status()
-        raw = r.json()["result"]["list"]  # neueste zuerst!
-        raw.reverse()  # → älteste zuerst
+        raw = r.json()  # älteste zuerst
         candles = [{
             'close': float(k[4]), 'high': float(k[2]),
-            'low': float(k[3]), 'volume': float(k[6]),  # turnover in USDT
+            'low': float(k[3]), 'volume': float(k[7]),  # Quote-Volumen (USDT)
         } for k in raw]
         if len(candles) > 1:
             candles = candles[:-1]  # laufende Kerze entfernen
@@ -228,7 +221,7 @@ def sparkline_svg(values: list, color: str = "#2563eb", w: int = 120, h: int = 3
 
 
 def tv_link(symbol: str) -> str:
-    return f"https://www.tradingview.com/chart/?symbol=BYBIT:{symbol}.P"
+    return f"https://www.tradingview.com/chart/?symbol=BINANCE:{symbol}"
 
 
 def build_html(stage1: list, stage2: list, btc_context: str, scanned: int) -> str:
@@ -296,7 +289,7 @@ a:hover {{ text-decoration: underline; }}
 </head>
 <body>
 <h1>Crypto Bottom Screener</h1>
-<p class="meta">Weinstein Stage 1 → 2 · {scanned} Bybit-Perps gescannt · Stand: {now}</p>
+<p class="meta">Weinstein Stage 1 → 2 · {scanned} Binance-Paare gescannt · Stand: {now}</p>
 <div class="context">{btc_context}</div>
 {s2_section}
 {s1_section}
@@ -345,9 +338,9 @@ def send_telegram(message: str):
 # ─────────────────────────────────────────────
 
 def main():
-    log.info("🔍 Screener startet (Bybit)...")
-    symbols = get_all_linear_symbols()
-    log.info(f"   {len(symbols)} USDT-Perps")
+    log.info("🔍 Screener startet (Binance Spot-Daten)...")
+    symbols = get_all_usdt_symbols()
+    log.info(f"   {len(symbols)} USDT-Paare")
 
     stage1, stage2 = [], []
     for i, sym in enumerate(symbols):
