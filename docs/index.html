@@ -21,12 +21,44 @@ td { padding: 10px 12px; border-top: 1px solid #f0f0f0; font-size: 14px; }
 a { color: #2563eb; text-decoration: none; }
 a:hover { text-decoration: underline; }
 .footer { margin-top: 40px; color: #999; font-size: 12px; }
+th { cursor: pointer; user-select: none; }
+th:hover { background: #ebebeb; }
+#search { padding: 8px 12px; width: 240px; border: 1px solid #ddd; border-radius: 6px;
+           font-size: 14px; margin: 12px 0 4px; }
 </style>
+<script>
+function sortTable(th) {
+  const table = th.closest('table');
+  const idx = [...th.parentNode.children].indexOf(th);
+  const rows = [...table.querySelectorAll('tr')].slice(1);
+  const asc = th.dataset.asc !== 'true';
+  th.dataset.asc = asc;
+  rows.sort((a, b) => {
+    let x = a.children[idx].innerText.replace(/[^0-9.,-]/g, '').replace(',', '.');
+    let y = b.children[idx].innerText.replace(/[^0-9.,-]/g, '').replace(',', '.');
+    if (x !== '' && y !== '' && !isNaN(x) && !isNaN(y)) return asc ? x - y : y - x;
+    return asc ? a.children[idx].innerText.localeCompare(b.children[idx].innerText)
+               : b.children[idx].innerText.localeCompare(a.children[idx].innerText);
+  });
+  rows.forEach(r => table.appendChild(r));
+}
+function filterTables() {
+  const q = document.getElementById('search').value.toUpperCase();
+  document.querySelectorAll('table tr').forEach(r => {
+    if (r.querySelector('th')) return;
+    r.style.display = r.innerText.toUpperCase().includes(q) ? '' : 'none';
+  });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('th').forEach(th => th.onclick = () => sortTable(th));
+});
+</script>
 </head>
 <body>
 <h1>Crypto Bottom Screener</h1>
-<p class="meta">Weinstein Stage 1 → 2 · 433 Binance-Paare gescannt · Stand: 2026-07-07 11:43 UTC</p>
+<p class="meta">Weinstein Stage 1 → 2 · 433 Binance-Paare gescannt · Stand: 2026-07-07 12:10 UTC</p>
 <div class="context"><b>Bitcoin unter der 200-Tage-Linie</b> (-14.2%) — Bärenmarkt-Kontext. Frühe Setups mit erhöhtem Fehlsignal-Risiko.</div>
+<input id="search" placeholder="🔎 Coin filtern..." onkeyup="filterTables()">
 <h2>🚀 Ausbrüche (Stufe 2)</h2><p class='sub'>Keine Ausbrüche heute.</p>
 
 <h2>👀 Basis baut (Stufe 1 — Watchlist)</h2>
