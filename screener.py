@@ -285,12 +285,43 @@ td {{ padding: 10px 12px; border-top: 1px solid #f0f0f0; font-size: 14px; }}
 a {{ color: #2563eb; text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
 .footer {{ margin-top: 40px; color: #999; font-size: 12px; }}
+th {{ cursor: pointer; user-select: none; }}
+th:hover {{ background: #ebebeb; }}
+#search {{ padding: 8px 12px; width: 240px; border: 1px solid #ddd; border-radius: 6px;
+           font-size: 14px; margin: 12px 0 4px; }}
 </style>
+<script>
+function sortTable(th) {{
+  const table = th.closest('table');
+  const idx = [...th.parentNode.children].indexOf(th);
+  const rows = [...table.querySelectorAll('tr')].slice(1);
+  const asc = th.dataset.asc !== 'true';
+  th.dataset.asc = asc;
+  rows.sort((a, b) => {{
+    let x = a.children[idx].innerText.replace(/[^0-9.,-]/g, '').replace(',', '.');
+    let y = b.children[idx].innerText.replace(/[^0-9.,-]/g, '').replace(',', '.');
+    if (x !== '' && y !== '' && !isNaN(x) && !isNaN(y)) return asc ? x - y : y - x;
+    return asc ? a.children[idx].innerText.localeCompare(b.children[idx].innerText)
+               : b.children[idx].innerText.localeCompare(a.children[idx].innerText);
+  }});
+  rows.forEach(r => table.appendChild(r));
+}}
+function filterTables() {{
+  const q = document.getElementById('search').value.toUpperCase();
+  document.querySelectorAll('table tr').forEach(r => {{
+    if (r.querySelector('th')) return;
+    r.style.display = r.innerText.toUpperCase().includes(q) ? '' : 'none';
+  }});
+}}
+document.addEventListener('DOMContentLoaded', () => {{
+  document.querySelectorAll('th').forEach(th => th.onclick = () => sortTable(th));
+}});
+</script>
 </head>
 <body>
 <h1>Crypto Bottom Screener</h1>
 <p class="meta">Weinstein Stage 1 → 2 · {scanned} Binance-Paare gescannt · Stand: {now}</p>
-<div class="context">{btc_context}</div>
+<div class="context">{btc_context}</div>\n<input id="search" placeholder="🔎 Coin filtern..." onkeyup="filterTables()">
 {s2_section}
 {s1_section}
 <p class="footer">Setup: Close &gt; EMA34 (5–40 Tage, Retest bestätigt, max 25% drüber) ·
@@ -333,6 +364,24 @@ def send_telegram(message: str):
         log.error(f"Telegram: {e}")
 
 
+
+
+STATE_FILE = "state.json"
+
+def load_state() -> dict:
+    try:
+        with open(STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"stage1": [], "stage2": []}
+
+
+def save_state(stage1: list, stage2: list):
+    with open(STATE_FILE, "w") as f:
+        json.dump({"stage1": [r.symbol for r in stage1],
+                   "stage2": [r.symbol for r in stage2],
+                   "updated": datetime.now(timezone.utc).isoformat()}, f)
+
 # ─────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────
@@ -373,19 +422,30 @@ def main():
         user, name = repo.split("/")
         site_url = f"\n\n🔗 https://{user}.github.io/{name}/"
 
-    lines = []
-    if stage2:
-        lines.append("🚀 <b>AUSBRÜCHE:</b>")
-        for r in stage2:
-            lines.append(f"✅ {r.symbol.replace('USDT','')} — {r.vol_ratio}x Vol, 90d-Hoch")
-    if stage1:
-        lines.append(f"\n👀 <b>Watchlist ({len(stage1)}):</b> " +
-                     ", ".join(r.symbol.replace('USDT','') for r in stage1[:12]))
-    if not lines:
-        lines.append("Keine Kandidaten heute.")
+    prev = load_state()
+    prev_all = set(prev.get("stage1", [])) | set(prev.get("stage2", []))
+    prev_s2 = set(prev.get("stage2", []))
 
-    send_telegram(f"🔍 <b>BOTTOM SCREENER</b> — {datetime.now(timezone.utc).strftime('%d.%m.')}\n"
-                  + "\n".join(lines) + site_url)
+    new_s2 = [r for r in stage2 if r.symbol not in prev_s2]           # neue Ausbrüche (inkl. Upgrades)
+    new_s1 = [r for r in stage1 if r.symbol not in prev_all]          # ganz neue Watchlist-Coins
+
+    lines = []
+    if new_s2:
+        lines.append("🚀 <b>NEUE AUSBRÜCHE:</b>")
+        for r in new_s2:
+            lines.append(f"✅ {r.symbol.replace('USDT','')} — {r.vol_ratio}x Vol, 90d-Hoch")
+    if new_s1:
+        lines.append(f"\n👀 <b>NEU auf Watchlist:</b> " +
+                     ", ".join(r.symbol.replace('USDT','') for r in new_s1))
+    if lines:
+        lines.append(f"\n<i>Gesamt: {len(stage2)} Ausbrüche, {len(stage1)} Watchlist → Website</i>")
+        send_telegram(f"🔍 <b>BOTTOM SCREENER</b> — {datetime.now(timezone.utc).strftime('%d.%m.')}\n"
+                      + "\n".join(lines) + site_url)
+        log.info(f"Telegram: {len(new_s2)} neue Ausbrüche, {len(new_s1)} neue Watchlist")
+    else:
+        log.info("Keine neuen Kandidaten – kein Telegram-Alert")
+
+    save_state(stage1, stage2)
     log.info("Fertig.")
 
 
